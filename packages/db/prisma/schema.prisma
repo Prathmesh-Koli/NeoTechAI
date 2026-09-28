@@ -1,0 +1,366 @@
+// Data model for the digital answer-script evaluation system (CBSE OSM-style).
+// See README.md / project docs for the overall architecture this supports.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & Identity
+// ---------------------------------------------------------------------------
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users    User[]
+  exams    Exam[]
+  students Student[]
+
+  @@map("tenants")
+}
+
+enum Role {
+  SUPER_ADMIN
+  TENANT_ADMIN
+  CHIEF_EVALUATOR
+  EVALUATOR
+}
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String   @map("tenant_id")
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         Role
+  // TOTP secret for 2FA login; null until the user completes 2FA enrollment.
+  totpSecret   String?  @map("totp_secret")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  evaluatorAllocations Allocation[]  @relation("EvaluatorAllocations")
+  moderatedAllocations Allocation[]  @relation("ModeratorAllocations")
+  annotations          Annotation[]
+  auditLogs            AuditLog[]
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Exam structure: Exam -> QuestionPaper -> Question -> RubricStep
+// ---------------------------------------------------------------------------
+
+model Exam {
+  id           String   @id @default(cuid())
+  tenantId     String   @map("tenant_id")
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  name         String
+  subjectCode  String   @map("subject_code")
+  academicYear String   @map("academic_year")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  questionPapers QuestionPaper[]
+  answerScripts  AnswerScript[]
+
+  @@index([tenantId])
+  @@map("exams")
+}
+
+model QuestionPaper {
+  id         String   @id @default(cuid())
+  tenantId   String   @map("tenant_id")
+  examId     String   @map("exam_id")
+  exam       Exam     @relation(fields: [examId], references: [id])
+  title      String
+  totalMarks Decimal  @map("total_marks") @db.Decimal(6, 2)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  questions Question[]
+
+  @@index([tenantId])
+  @@index([examId])
+  @@map("question_papers")
+}
+
+model Question {
+  id              String   @id @default(cuid())
+  tenantId        String   @map("tenant_id")
+  questionPaperId String   @map("question_paper_id")
+  questionPaper   QuestionPaper @relation(fields: [questionPaperId], references: [id])
+  questionNumber  String   @map("question_number") // e.g. "Q5", "Q5(a)"
+
+  // Questions sharing the same (parentQuestionId, optionGroup) are mutually
+  // exclusive alternatives (e.g. "attempt 5(a) OR 5(b)"). The scoring engine
+  // must ensure exactly one ends up ATTEMPTED; the rest get explicit
+  // NOT_APPLICABLE marks rather than being left blank.
+  optionGroup      String?    @map("option_group")
+  parentQuestionId String?    @map("parent_question_id")
+  parent           Question?  @relation("QuestionHierarchy", fields: [parentQuestionId], references: [id])
+  subQuestions     Question[] @relation("QuestionHierarchy")
+
+  maxMarks Decimal @map("max_marks") @db.Decimal(6, 2)
+
+  steps RubricStep[]
+
+  @@unique([questionPaperId, questionNumber])
+  @@index([tenantId])
+  @@index([parentQuestionId])
+  @@map("questions")
+}
+
+// Every gradable question has at least one step, even if it's just a single
+// "whole question" step. This keeps scoring uniform (always step-wise) and
+// avoids a nullable FK on Mark, which would otherwise break the uniqueness
+// guarantee (Postgres treats NULL as distinct in unique constraints).
+model RubricStep {
+  id          String  @id @default(cuid())
+  tenantId    String  @map("tenant_id")
+  questionId  String  @map("question_id")
+  question    Question @relation(fields: [questionId], references: [id])
+  stepNumber  Int     @map("step_number")
+  description String
+  maxMarks    Decimal @map("max_marks") @db.Decimal(5, 2)
+
+  marks Mark[]
+
+  @@unique([questionId, stepNumber])
+  @@index([tenantId])
+  @@map("rubric_steps")
+}
+
+// ---------------------------------------------------------------------------
+// Students & anonymization
+// ---------------------------------------------------------------------------
+
+model Student {
+  id         String @id @default(cuid())
+  tenantId   String @map("tenant_id")
+  tenant     Tenant @relation(fields: [tenantId], references: [id])
+  rollNumber String @map("roll_number")
+  name       String
+
+  scriptMaps StudentScriptMap[]
+
+  @@unique([tenantId, rollNumber])
+  @@index([tenantId])
+  @@map("students")
+}
+
+// Kept deliberately separate from AnswerScript so it can carry a stricter,
+// separate DB access policy (TENANT_ADMIN/SUPER_ADMIN only). Evaluators and
+// Chief Evaluators must never be able to join a script to a student identity
+// -- that's what makes evaluation blind/anonymous.
+model StudentScriptMap {
+  id             String       @id @default(cuid())
+  tenantId       String       @map("tenant_id")
+  answerScriptId String       @unique @map("answer_script_id")
+  answerScript   AnswerScript @relation(fields: [answerScriptId], references: [id])
+  studentId      String       @map("student_id")
+  student        Student      @relation(fields: [studentId], references: [id])
+
+  @@index([tenantId])
+  @@map("student_script_maps")
+}
+
+// ---------------------------------------------------------------------------
+// Scripts & pages
+// ---------------------------------------------------------------------------
+
+enum ScriptStatus {
+  UPLOADED
+  ALLOCATED
+  IN_EVALUATION
+  EVALUATED
+  MODERATED
+  LOCKED
+}
+
+model AnswerScript {
+  id       String       @id @default(cuid())
+  tenantId String       @map("tenant_id")
+  examId   String       @map("exam_id")
+  exam     Exam         @relation(fields: [examId], references: [id])
+
+  // The only identifier evaluators ever see. Must never be derivable from the
+  // student's roll number/name (no shared prefix, no sequential numbering
+  // that mirrors class rank/seating, etc.) -- see StudentScriptMap.
+  scriptCode String       @unique @map("script_code")
+  status     ScriptStatus @default(UPLOADED)
+  totalPages Int          @map("total_pages")
+
+  // Denormalized cache recomputed from Mark rows whenever an allocation is
+  // submitted/moderated. Not the source of truth -- never write to it
+  // directly; Mark rows are what's authoritative.
+  totalMarksAwarded Decimal? @map("total_marks_awarded") @db.Decimal(6, 2)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  pages       ScriptPage[]
+  allocations Allocation[]
+  studentMap  StudentScriptMap?
+
+  @@index([tenantId])
+  @@index([examId])
+  @@map("answer_scripts")
+}
+
+model ScriptPage {
+  id             String       @id @default(cuid())
+  tenantId       String       @map("tenant_id")
+  answerScriptId String       @map("answer_script_id")
+  answerScript   AnswerScript @relation(fields: [answerScriptId], references: [id])
+  pageNumber     Int          @map("page_number")
+  // Object-storage key (S3/MinIO), not a public URL -- served via short-lived
+  // signed URLs at request time.
+  imageUrl       String       @map("image_url")
+  // Natural pixel dimensions of the source image. The evaluation canvas needs
+  // these up front to size/scale the stage before the image itself has
+  // loaded in the browser.
+  imageWidth     Int          @map("image_width")
+  imageHeight    Int          @map("image_height")
+  isBlank        Boolean      @default(false) @map("is_blank")
+
+  annotations Annotation[]
+
+  @@unique([answerScriptId, pageNumber])
+  @@index([tenantId])
+  @@map("script_pages")
+}
+
+// ---------------------------------------------------------------------------
+// Allocation (assignment of scripts to evaluators) & evaluation workflow
+// ---------------------------------------------------------------------------
+
+enum AllocationType {
+  PRIMARY
+  MODERATION
+  REVALUATION
+}
+
+enum AllocationStatus {
+  PENDING
+  IN_PROGRESS
+  SUBMITTED
+  RETURNED_FOR_REVISION
+  LOCKED
+}
+
+model Allocation {
+  id             String       @id @default(cuid())
+  tenantId       String       @map("tenant_id")
+  answerScriptId String       @map("answer_script_id")
+  answerScript   AnswerScript @relation(fields: [answerScriptId], references: [id])
+
+  evaluatorId String @map("evaluator_id")
+  evaluator   User   @relation("EvaluatorAllocations", fields: [evaluatorId], references: [id])
+
+  // Set when a Chief Evaluator opens this allocation for spot-check/moderation.
+  moderatedById String? @map("moderated_by_id")
+  moderatedBy   User?   @relation("ModeratorAllocations", fields: [moderatedById], references: [id])
+
+  type   AllocationType   @default(PRIMARY)
+  status AllocationStatus @default(PENDING)
+
+  assignedAt  DateTime  @default(now()) @map("assigned_at")
+  startedAt   DateTime? @map("started_at")
+  submittedAt DateTime? @map("submitted_at")
+  lockedAt    DateTime? @map("locked_at")
+
+  marks       Mark[]
+  annotations Annotation[]
+  auditLogs   AuditLog[]
+
+  // One evaluator gets at most one allocation of a given type per script;
+  // moderation/revaluation are separate rows so evaluation history is never
+  // overwritten, only added to.
+  @@unique([answerScriptId, evaluatorId, type])
+  @@index([tenantId])
+  @@index([evaluatorId])
+  @@index([status])
+  @@map("allocations")
+}
+
+enum AttemptStatus {
+  ATTEMPTED
+  NOT_ATTEMPTED
+  NOT_APPLICABLE // e.g. the un-chosen side of an OR question
+}
+
+model Mark {
+  id           String     @id @default(cuid())
+  tenantId     String     @map("tenant_id")
+  allocationId String     @map("allocation_id")
+  allocation   Allocation @relation(fields: [allocationId], references: [id])
+  rubricStepId String     @map("rubric_step_id")
+  rubricStep   RubricStep @relation(fields: [rubricStepId], references: [id])
+
+  attemptStatus AttemptStatus @map("attempt_status")
+  // Must be null whenever attemptStatus != ATTEMPTED -- enforced at the
+  // application layer (a step can't have a numeric mark and be "not
+  // attempted"/"not applicable" at the same time).
+  marksAwarded  Decimal?      @map("marks_awarded") @db.Decimal(5, 2)
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  @@unique([allocationId, rubricStepId])
+  @@index([tenantId])
+  @@map("marks")
+}
+
+// ---------------------------------------------------------------------------
+// Annotations (canvas overlay) & audit trail
+// ---------------------------------------------------------------------------
+
+enum AnnotationType {
+  TICK
+  CROSS
+  BLANK_PAGE
+  NOTE
+  CUSTOM
+}
+
+model Annotation {
+  id           String     @id @default(cuid())
+  tenantId     String     @map("tenant_id")
+  scriptPageId String     @map("script_page_id")
+  scriptPage   ScriptPage @relation(fields: [scriptPageId], references: [id])
+  allocationId String     @map("allocation_id")
+  allocation   Allocation @relation(fields: [allocationId], references: [id])
+  createdById  String     @map("created_by_id")
+  createdBy    User       @relation(fields: [createdById], references: [id])
+
+  type AnnotationType
+  // Shape coordinates, text content, color, etc. Left schemaless because the
+  // canvas library (Konva/Fabric) owns this shape, not the backend.
+  data Json
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@index([scriptPageId])
+  @@index([allocationId])
+  @@map("annotations")
+}
+
+model AuditLog {
+  id           String     @id @default(cuid())
+  tenantId     String     @map("tenant_id")
+  allocationId String     @map("allocation_id")
+  allocation   Allocation @relation(fields: [allocationId], references: [id])
+  action       String     // e.g. "SUBMITTED", "MARK_UPDATED", "VALIDATION_FAILED"
+  metadata     Json?
+  performedById String    @map("performed_by_id")
+  performedBy   User      @relation(fields: [performedById], references: [id])
+  performedAt   DateTime  @default(now()) @map("performed_at")
+
+  @@index([tenantId])
+  @@index([allocationId])
+  @@map("audit_logs")
+}

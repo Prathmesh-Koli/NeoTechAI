@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: des-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: des
+      POSTGRES_PASSWORD: des_dev_password
+      POSTGRES_DB: digital_exam_system
+    ports:
+      - "5432:5432"
+    volumes:
+      - des_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U des"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  des_postgres_data:

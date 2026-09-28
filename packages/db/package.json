@@ -1,0 +1,22 @@
+{
+  "name": "@digital-exam-system/db",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "validate": "prisma validate",
+    "format": "prisma format",
+    "migrate": "prisma migrate dev",
+    "generate": "prisma generate",
+    "seed": "tsx prisma/seed.ts",
+    "studio": "prisma studio"
+  },
+  "devDependencies": {
+    "bcryptjs": "^3.0.3",
+    "prisma": "^5.22.0",
+    "tsx": "^4.23.15"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0"
+  }
+}

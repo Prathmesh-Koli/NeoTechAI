@@ -1,0 +1,22 @@
+{
+  "name": "digital-exam-system",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend",
+    "packages/*"
+  ],
+  "scripts": {
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "dev:backend": "npm run start:dev --workspace backend",
+    "prisma:validate": "npm run validate --workspace packages/db",
+    "prisma:format": "npm run format --workspace packages/db",
+    "prisma:migrate": "npm run migrate --workspace packages/db",
+    "prisma:generate": "npm run generate --workspace packages/db",
+    "prisma:seed": "npm run seed --workspace packages/db",
+    "prisma:studio": "npm run studio --workspace packages/db"
+  }
+}
