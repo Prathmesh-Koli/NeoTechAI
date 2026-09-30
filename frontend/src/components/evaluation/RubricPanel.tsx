@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
+import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Divider from "@mui/material/Divider";
 import Stack from "@mui/material/Stack";
@@ -47,6 +48,11 @@ function groupQuestions(questions: WorkspaceQuestion[]): QuestionGroup[] {
   return groups;
 }
 
+// "Q5(a) / Q5(b)" -> "Q5"; plain questions keep their number.
+function groupLabel(group: QuestionGroup): string {
+  return group.questions[0].questionNumber.replace(/\s*\(.*\)\s*$/, "");
+}
+
 export function RubricPanel() {
   const questions = useEvaluationStore((s) => s.questions);
   const marks = useEvaluationStore((s) => s.marks);
@@ -59,6 +65,8 @@ export function RubricPanel() {
   const [submitting, setSubmitting] = useState(false);
   const [showIssues, setShowIssues] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [activeGroupKey, setActiveGroupKey] = useState<string | null>(null);
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const groups = useMemo(() => groupQuestions(questions), [questions]);
   const grandTotal = useMemo(
@@ -70,6 +78,25 @@ export function RubricPanel() {
     [questions, marks],
   );
   const unreviewedPages = useMemo(() => getUnreviewedPages(pages), [pages]);
+
+  function goToGroup(key: string) {
+    setActiveGroupKey(key);
+    cardRefs.current[key]?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function isGroupComplete(group: QuestionGroup): boolean {
+    const chosenId = group.optionGroup ? selectedOrOption[group.optionGroup] : undefined;
+    const question = group.optionGroup
+      ? group.questions.find((q) => q.id === chosenId)
+      : group.questions[0];
+    return (
+      !!question &&
+      question.steps.every((step) => {
+        const mark = marks[step.id];
+        return !!mark && mark.attemptStatus !== null;
+      })
+    );
+  }
 
   async function handleSubmit() {
     if (validationIssues.length > 0 || unreviewedPages.length > 0) {
@@ -99,6 +126,22 @@ export function RubricPanel() {
     <Stack spacing={2} sx={{ height: "100%" }}>
       <Typography variant="h6">Rubric &amp; scoring</Typography>
 
+      {/* Question-wise navigation: one chip per question in the paper, so the
+          navigator follows whatever paper the exam has. */}
+      <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap" }}>
+        {groups.map((group) => (
+          <Chip
+            key={group.key}
+            label={groupLabel(group)}
+            size="small"
+            clickable
+            color={isGroupComplete(group) ? "success" : "default"}
+            variant={activeGroupKey === group.key ? "filled" : "outlined"}
+            onClick={() => goToGroup(group.key)}
+          />
+        ))}
+      </Stack>
+
       <Box sx={{ flexGrow: 1, overflowY: "auto", pr: 0.5 }}>
         <Stack spacing={1.5}>
           {groups.map((group) => {
@@ -110,7 +153,14 @@ export function RubricPanel() {
                 : group.questions[0];
 
             return (
-              <Card key={group.key} variant="outlined">
+              <Card
+                key={group.key}
+                variant="outlined"
+                ref={(el: HTMLDivElement | null) => {
+                  cardRefs.current[group.key] = el;
+                }}
+                sx={activeGroupKey === group.key ? { borderColor: "primary.main" } : undefined}
+              >
                 <CardContent>
                   {group.optionGroup ? (
                     <Stack spacing={1} sx={{ mb: 1 }}>

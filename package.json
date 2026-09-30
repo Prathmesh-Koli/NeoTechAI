@@ -11,7 +11,7 @@
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "dev:frontend": "npm run dev --workspace frontend",
-    "dev:backend": "npm run start:dev --workspace backend",
+    "dev:backend": "npm run prisma:generate && npm run start:dev --workspace backend",
     "prisma:validate": "npm run validate --workspace packages/db",
     "prisma:format": "npm run format --workspace packages/db",
     "prisma:migrate": "npm run migrate --workspace packages/db",

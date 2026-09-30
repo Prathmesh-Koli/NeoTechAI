@@ -14,9 +14,11 @@ const DEMO_PASSWORD = "Passw0rd!";
 // These SVGs live in frontend/public/mock-scripts -- the frontend serves them
 // itself, so the backend just needs to store the same relative path.
 const PAGES = [
-  { pageNumber: 1, imageUrl: "/mock-scripts/page-1.svg", isBlank: false },
-  { pageNumber: 2, imageUrl: "/mock-scripts/page-2.svg", isBlank: false },
-  { pageNumber: 3, imageUrl: "/mock-scripts/page-3.svg", isBlank: true },
+  { pageNumber: 1, imageUrl: "/mock-scripts/aiml-page-1.svg", isBlank: false },
+  { pageNumber: 2, imageUrl: "/mock-scripts/aiml-page-2.svg", isBlank: false },
+  { pageNumber: 3, imageUrl: "/mock-scripts/aiml-page-3.svg", isBlank: false },
+  { pageNumber: 4, imageUrl: "/mock-scripts/aiml-page-4.svg", isBlank: false },
+  { pageNumber: 5, imageUrl: "/mock-scripts/aiml-page-5.svg", isBlank: true },
 ];
 const PAGE_WIDTH = 850;
 const PAGE_HEIGHT = 1200;
@@ -61,15 +63,16 @@ async function main() {
 
   // --- Exam + question paper + rubric -------------------------------------
 
+  const EXAM_NAME = "TYBSc (AI & ML) AI - II Prelim Exam";
   let exam = await prisma.exam.findFirst({
-    where: { tenantId: tenant.id, name: "Class 10 Mathematics" },
+    where: { tenantId: tenant.id, name: EXAM_NAME },
   });
   exam ??= await prisma.exam.create({
     data: {
       tenantId: tenant.id,
-      name: "Class 10 Mathematics",
-      subjectCode: "MATH-041",
-      academicYear: "2025-26",
+      name: EXAM_NAME,
+      subjectCode: "AIML-301-MJ-T",
+      academicYear: "2026-27",
     },
   });
 
@@ -77,7 +80,7 @@ async function main() {
     where: { examId: exam.id },
   });
   questionPaper ??= await prisma.questionPaper.create({
-    data: { tenantId: tenant.id, examId: exam.id, title: "Term 2 Question Paper", totalMarks: 10 },
+    data: { tenantId: tenant.id, examId: exam.id, title: "Prelim Exam September-2026", totalMarks: 35 },
   });
 
   interface StepDef {
@@ -92,42 +95,65 @@ async function main() {
     steps: StepDef[];
   }
 
+  // The paper uses "attempt any N of M" questions. The scoring model only
+  // supports "attempt exactly one" (optionGroup), so those are modelled as N
+  // answer slots -- the evaluator marks the N answers the student attempted.
+  // That keeps each question's max, and the paper total, equal to the printed
+  // marks (8 + 8 + 8 + 8 + 3 = 35).
+  const answerSlots = (count: number, marksEach: number, what: string): StepDef[] =>
+    Array.from({ length: count }, (_, i) => ({
+      stepNumber: i + 1,
+      description: `Answer ${i + 1} - ${what}`,
+      maxMarks: marksEach,
+    }));
+
   const questionDefs: QuestionDef[] = [
     {
+      // Q.1 Attempt any EIGHT [8*1=8]
       questionNumber: "Q1",
-      maxMarks: 2,
+      maxMarks: 8,
       optionGroup: null,
-      steps: [
-        { stepNumber: 1, description: "Correct formula/approach identified", maxMarks: 1 },
-        { stepNumber: 2, description: "Correct final answer", maxMarks: 1 },
-      ],
+      steps: answerSlots(8, 1, "correct definition"),
     },
     {
+      // Q.2 Attempt any FOUR [4*2=8]
       questionNumber: "Q2",
-      maxMarks: 3,
+      maxMarks: 8,
       optionGroup: null,
-      steps: [
-        { stepNumber: 1, description: "Full working shown with correct answer", maxMarks: 3 },
-      ],
+      steps: answerSlots(4, 2, "correct explanation / example"),
     },
     {
+      // Q.3 Attempt any TWO [2*4=8]
+      questionNumber: "Q3",
+      maxMarks: 8,
+      optionGroup: null,
+      steps: answerSlots(2, 4, "concept, working and example"),
+    },
+    {
+      // Q.4 Attempt any TWO [2*4=8]
+      questionNumber: "Q4",
+      maxMarks: 8,
+      optionGroup: null,
+      steps: answerSlots(2, 4, "concept, working and example"),
+    },
+    {
+      // Q.5 Attempt any ONE [1*3=3] -- (a) theory OR (b) numerical
       questionNumber: "Q5(a)",
-      maxMarks: 5,
+      maxMarks: 3,
       optionGroup: "q5-or",
       steps: [
-        { stepNumber: 1, description: "Correct setup of equations", maxMarks: 2 },
-        { stepNumber: 2, description: "Correct method of solving", maxMarks: 2 },
-        { stepNumber: 3, description: "Correct final answer with units", maxMarks: 1 },
+        { stepNumber: 1, description: "Relationship between probability, evidence and decisions explained", maxMarks: 2 },
+        { stepNumber: 2, description: "Relevant example / clarity", maxMarks: 1 },
       ],
     },
     {
       questionNumber: "Q5(b)",
-      maxMarks: 5,
+      maxMarks: 3,
       optionGroup: "q5-or",
       steps: [
-        { stepNumber: 1, description: "Correct diagram/construction", maxMarks: 2 },
-        { stepNumber: 2, description: "Correct proof steps", maxMarks: 2 },
-        { stepNumber: 3, description: "Correct conclusion", maxMarks: 1 },
+        { stepNumber: 1, description: "HMM transition/observation probabilities set up correctly", maxMarks: 1 },
+        { stepNumber: 2, description: "Correct calculation", maxMarks: 1 },
+        { stepNumber: 3, description: "Correct final answer", maxMarks: 1 },
       ],
     },
   ];
@@ -177,7 +203,7 @@ async function main() {
 
   const answerScript = await prisma.answerScript.upsert({
     where: { scriptCode: "SC-88213" },
-    update: {},
+    update: { totalPages: PAGES.length, examId: exam.id },
     create: {
       tenantId: tenant.id,
       examId: exam.id,
@@ -217,7 +243,7 @@ async function main() {
   // --- Allocation ----------------------------------------------------------
 
   const evaluatorId = users.get("evaluator1@demo.edu")!;
-  await prisma.allocation.upsert({
+  const allocation = await prisma.allocation.upsert({
     where: {
       answerScriptId_evaluatorId_type: {
         answerScriptId: answerScript.id,
@@ -235,6 +261,15 @@ async function main() {
     },
   });
 
+  // Marks recorded against an earlier version of the rubric no longer match
+  // this paper's questions -- drop them so the evaluator starts clean.
+  await prisma.mark.deleteMany({
+    where: {
+      allocationId: allocation.id,
+      rubricStep: { question: { questionPaperId: { not: questionPaper.id } } },
+    },
+  });
+
   console.log(`Seeded tenant "${tenant.name}" with ${userDefs.length} users.`);
   console.log(`Seeded exam "${exam.name}" with script ${answerScript.scriptCode}, allocated to evaluator1@demo.edu.`);
   console.log(`All users' password: ${DEMO_PASSWORD}`);
@@ -244,7 +279,7 @@ async function main() {
 main()
   .catch((err) => {
     console.error(err);
-    process.exitCode = 1;
+    throw err;
   })
   .finally(async () => {
     await prisma.$disconnect();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import AppBar from "@mui/material/AppBar";
@@ -16,6 +16,7 @@ import LogoutIcon from "@mui/icons-material/Logout";
 import Stack from "@mui/material/Stack";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
+import { QuestionPaperDialog } from "@/components/evaluation/QuestionPaperDialog";
 import { useAuth } from "@/lib/AuthContext";
 import { navItemsByRole, roleLabels } from "@/lib/navigation";
 
@@ -25,6 +26,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { status, user, logout } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
+  const [questionPaperOpen, setQuestionPaperOpen] = useState(false);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -111,8 +113,18 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <ListItemText primary={item.label} />
             </ListItemButton>
           ))}
+          {user.role === "EVALUATOR" && (
+            <ListItemButton onClick={() => setQuestionPaperOpen(true)}>
+              <ListItemText primary="View question paper" />
+            </ListItemButton>
+          )}
         </List>
       </Drawer>
+
+      <QuestionPaperDialog
+        open={questionPaperOpen}
+        onClose={() => setQuestionPaperOpen(false)}
+      />
 
       <Box
         component="main"
