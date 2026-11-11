@@ -80,6 +80,19 @@ export class ModerationService {
     }));
   }
 
+  async getSummary(user: AuthenticatedUser) {
+    const [queue, inProgress, returnedForRevision] = await Promise.all([
+      this.getQueue(user),
+      this.prisma.allocation.count({
+        where: { tenantId: user.tenantId, status: 'IN_PROGRESS' },
+      }),
+      this.prisma.allocation.count({
+        where: { tenantId: user.tenantId, status: 'RETURNED_FOR_REVISION' },
+      }),
+    ]);
+    return { awaitingModeration: queue.length, inProgress, returnedForRevision };
+  }
+
   async getDetail(allocationId: string, user: AuthenticatedUser) {
     const allocation = await this.prisma.allocation.findFirst({
       where: { id: allocationId, tenantId: user.tenantId },

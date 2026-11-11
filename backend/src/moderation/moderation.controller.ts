@@ -28,6 +28,11 @@ import { ModerationService } from './moderation.service.js';
 export class ModerationController {
   constructor(private readonly moderationService: ModerationService) {}
 
+  @Get('summary')
+  getSummary(@CurrentUser() user: AuthenticatedUser) {
+    return this.moderationService.getSummary(user);
+  }
+
   @Get('allocations')
   getQueue(@CurrentUser() user: AuthenticatedUser) {
     return this.moderationService.getQueue(user);

@@ -213,6 +213,13 @@ export const api = {
 
   // --- Chief Evaluator moderation -------------------------------------------
 
+  getModerationSummary: (accessToken: string) =>
+    request<{ awaitingModeration: number; inProgress: number; returnedForRevision: number }>(
+      "/moderation/summary",
+      {},
+      accessToken,
+    ),
+
   getModerationQueue: (accessToken: string) =>
     request<ModerationQueueItem[]>("/moderation/allocations", {}, accessToken),
 
