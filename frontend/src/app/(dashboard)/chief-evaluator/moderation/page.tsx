@@ -1,3 +1,6 @@
+"use client";
+
+import React, { useEffect, useState } from "react";
 import Button from "@mui/material/Button";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
@@ -8,11 +11,50 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
+import CircularProgress from "@mui/material/CircularProgress";
 import { StatusChip } from "@/components/StatusChip";
-import { mockAllocations } from "@/lib/mock-data";
+import Link from "next/link";
 
 export default function ModerationQueuePage() {
-  const queue = mockAllocations.filter((a) => a.status === "SUBMITTED");
+  const [queue, setQueue] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetch("http://localhost:4000/moderation/allocations", {
+      credentials: "include",
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch moderation queue");
+        return res.json();
+      })
+      .then((data) => {
+        setQueue(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(err.message);
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading) {
+    return (
+      <Stack spacing={3} alignItems="center" justifyContent="center" sx={{ minHeight: "400px" }}>
+        <CircularProgress />
+        <Typography>Loading moderation queue...</Typography>
+      </Stack>
+    );
+  }
+
+  if (error) {
+    return (
+      <Stack spacing={3}>
+        <Typography variant="h5">Moderation queue</Typography>
+        <Typography color="error">Error: {error}</Typography>
+      </Stack>
+    );
+  }
 
   return (
     <Stack spacing={3}>
@@ -30,16 +72,22 @@ export default function ModerationQueuePage() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {queue.map((allocation) => (
+            {queue.map((allocation: any) => (
               <TableRow key={allocation.id} hover>
-                <TableCell>{allocation.scriptCode}</TableCell>
-                <TableCell>{allocation.examName}</TableCell>
-                <TableCell>{allocation.evaluatorName}</TableCell>
+                <TableCell>{allocation.answerScript?.scriptCode}</TableCell>
+                <TableCell>{allocation.answerScript?.exam?.name}</TableCell>
+                <TableCell>{allocation.evaluator?.email}</TableCell>
                 <TableCell>
                   <StatusChip status={allocation.status} />
                 </TableCell>
                 <TableCell align="right">
-                  <Button size="small">Review</Button>
+                  <Button
+                    size="small"
+                    component={Link}
+                    href={`/chief-evaluator/moderation/${allocation.id}`}
+                  >
+                    Review
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}
