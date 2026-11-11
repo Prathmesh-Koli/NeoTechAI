@@ -51,6 +51,55 @@ export interface AllocationDetailResponse {
   marks: Record<string, { attemptStatus: AttemptStatus; marksAwarded: number | null }>;
 }
 
+export interface ModerationQueueItem {
+  id: string;
+  type: "PRIMARY" | "REVALUATION";
+  status: AllocationStatus;
+  submittedAt: string | null;
+  evaluator: { id: string; email: string };
+  scriptCode: string;
+  examName: string;
+  totalMarksAwarded: number | null;
+}
+
+export interface ModerationMark {
+  rubricStepId: string;
+  questionNumber: string;
+  stepNumber: number;
+  description: string;
+  maxMarks: number;
+  attemptStatus: AttemptStatus;
+  marksAwarded: number | null;
+}
+
+export interface ModerationDetailResponse {
+  id: string;
+  type: "PRIMARY" | "REVALUATION";
+  status: AllocationStatus;
+  submittedAt: string | null;
+  evaluator: { id: string; email: string };
+  scriptCode: string;
+  examName: string;
+  subjectCode: string;
+  totalMarksAwarded: number | null;
+  marks: ModerationMark[];
+  annotations: { id: string; scriptPageId: string; type: string; createdAt: string }[];
+}
+
+export interface AuditLogEntryResponse {
+  id: string;
+  action: string;
+  metadata: Record<string, unknown> | null;
+  performedAt: string;
+  performedBy: { id: string; email: string };
+}
+
+export interface MarkChange {
+  rubricStepId: string;
+  attemptStatus: AttemptStatus;
+  marksAwarded?: number | null;
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit,
@@ -159,6 +208,54 @@ export const api = {
     request<{ id: string; status: AllocationStatus; totalMarksAwarded: number }>(
       `/allocations/${allocationId}/submit`,
       { method: "POST" },
+      accessToken,
+    ),
+
+  // --- Chief Evaluator moderation -------------------------------------------
+
+  getModerationQueue: (accessToken: string) =>
+    request<ModerationQueueItem[]>("/moderation/allocations", {}, accessToken),
+
+  getModerationDetail: (accessToken: string, allocationId: string) =>
+    request<ModerationDetailResponse>(`/moderation/allocations/${allocationId}`, {}, accessToken),
+
+  getModerationAuditLog: (accessToken: string, allocationId: string) =>
+    request<AuditLogEntryResponse[]>(
+      `/moderation/allocations/${allocationId}/audit-log`,
+      {},
+      accessToken,
+    ),
+
+  adjustModerationMarks: (
+    accessToken: string,
+    allocationId: string,
+    marks: MarkChange[],
+    comments?: string,
+  ) =>
+    request<{ id: string; changed: number; oldTotal: number | null; newTotal: number }>(
+      `/moderation/allocations/${allocationId}/marks`,
+      { method: "PATCH", body: JSON.stringify({ marks, comments }) },
+      accessToken,
+    ),
+
+  approveAllocation: (accessToken: string, allocationId: string, comments?: string) =>
+    request<{ id: string; status: AllocationStatus }>(
+      `/moderation/allocations/${allocationId}/approve`,
+      { method: "POST", body: JSON.stringify({ comments }) },
+      accessToken,
+    ),
+
+  returnAllocation: (accessToken: string, allocationId: string, reason: string) =>
+    request<{ id: string; status: AllocationStatus }>(
+      `/moderation/allocations/${allocationId}/return`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+      accessToken,
+    ),
+
+  requestRecheck: (accessToken: string, allocationId: string, reason: string) =>
+    request<{ id: string; revaluationAllocationId: string; revaluationEvaluatorId: string }>(
+      `/moderation/allocations/${allocationId}/recheck`,
+      { method: "POST", body: JSON.stringify({ reason }) },
       accessToken,
     ),
 };

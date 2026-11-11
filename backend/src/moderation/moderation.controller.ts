@@ -1,9 +1,27 @@
-import { Controller, Get, Post, Body, Param, Req, UseGuards } from '@nestjs/common';
-import { ModerationService } from './moderation.service.js';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { CurrentUser } from '../auth/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
-import { RolesGuard } from '../auth/roles.guard.js';
 import { Roles } from '../auth/roles.decorator.js';
+import { RolesGuard } from '../auth/roles.guard.js';
+import type { AuthenticatedUser } from '../auth/types.js';
+import { AdjustMarksDto } from './dto/adjust-marks.dto.js';
+import {
+  ApproveDto,
+  RequestRecheckDto,
+  ReturnForRevisionDto,
+} from './dto/moderation-actions.dto.js';
+import { ModerationService } from './moderation.service.js';
 
+// Every route below is Chief Evaluator only: JwtAuthGuard authenticates,
+// RolesGuard rejects any other role with 403.
 @Controller('moderation')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('CHIEF_EVALUATOR')
@@ -11,28 +29,53 @@ export class ModerationController {
   constructor(private readonly moderationService: ModerationService) {}
 
   @Get('allocations')
-  async getPendingAllocations() {
-    return this.moderationService.getPendingAllocations();
+  getQueue(@CurrentUser() user: AuthenticatedUser) {
+    return this.moderationService.getQueue(user);
   }
 
   @Get('allocations/:id')
-  async getScriptDetails(@Param('id') id: string) {
-    return this.moderationService.getScriptDetails(id);
+  getDetail(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.moderationService.getDetail(id, user);
   }
 
-  @Post('allocations/:id/action')
-  async performAction(
-    @Param('id') id: string,
-    @Req() req: any,
-    @Body() body: { action: 'APPROVE' | 'RETURN_FOR_REVISION' | 'RECHECK'; marks?: any; comments?: string; reason?: string },
-  ) {
-    const userId = req.user?.id;
-    // Map frontend action strings to service-expected types
-    let mappedAction: 'APPROVE' | 'RETURN' | 'RECHECK' | 'ADJUST_MARKS' = 'APPROVE';
-    if (body.action === 'RETURN_FOR_REVISION') mappedAction = 'RETURN';
-    if (body.action === 'RECHECK') mappedAction = 'RECHECK';
-    if (body.action === 'APPROVE') mappedAction = 'APPROVE';
+  @Get('allocations/:id/audit-log')
+  getAuditLog(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.moderationService.getAuditLog(id, user);
+  }
 
-    return this.moderationService.performAction(id, userId, mappedAction, body);
+  @Patch('allocations/:id/marks')
+  adjustMarks(
+    @Param('id') id: string,
+    @Body() dto: AdjustMarksDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.moderationService.adjustMarks(id, user, dto);
+  }
+
+  @Post('allocations/:id/approve')
+  approve(
+    @Param('id') id: string,
+    @Body() dto: ApproveDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.moderationService.approve(id, user, dto);
+  }
+
+  @Post('allocations/:id/return')
+  returnForRevision(
+    @Param('id') id: string,
+    @Body() dto: ReturnForRevisionDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.moderationService.returnForRevision(id, user, dto);
+  }
+
+  @Post('allocations/:id/recheck')
+  requestRecheck(
+    @Param('id') id: string,
+    @Body() dto: RequestRecheckDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.moderationService.requestRecheck(id, user, dto);
   }
 }

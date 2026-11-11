@@ -1,7 +1,10 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import Alert from "@mui/material/Alert";
 import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
+import CircularProgress from "@mui/material/CircularProgress";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Table from "@mui/material/Table";
@@ -11,32 +14,25 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
-import CircularProgress from "@mui/material/CircularProgress";
-import { StatusChip } from "@/components/StatusChip";
 import Link from "next/link";
+import { StatusChip } from "@/components/StatusChip";
+import { api, type ModerationQueueItem } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 
 export default function ModerationQueuePage() {
-  const [queue, setQueue] = useState([]);
+  const { accessToken } = useAuth();
+  const [queue, setQueue] = useState<ModerationQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("http://localhost:4000/moderation/allocations", {
-      credentials: "include",
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch moderation queue");
-        return res.json();
-      })
-      .then((data) => {
-        setQueue(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
-  }, []);
+    if (!accessToken) return;
+    api
+      .getModerationQueue(accessToken)
+      .then((data) => setQueue(data))
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [accessToken]);
 
   if (loading) {
     return (
@@ -47,18 +43,11 @@ export default function ModerationQueuePage() {
     );
   }
 
-  if (error) {
-    return (
-      <Stack spacing={3}>
-        <Typography variant="h5">Moderation queue</Typography>
-        <Typography color="error">Error: {error}</Typography>
-      </Stack>
-    );
-  }
-
   return (
     <Stack spacing={3}>
       <Typography variant="h5">Moderation queue</Typography>
+
+      {error ? <Alert severity="error">{error}</Alert> : null}
 
       <TableContainer component={Paper} variant="outlined">
         <Table>
@@ -67,33 +56,43 @@ export default function ModerationQueuePage() {
               <TableCell>Script code</TableCell>
               <TableCell>Exam</TableCell>
               <TableCell>Evaluator</TableCell>
+              <TableCell>Type</TableCell>
+              <TableCell align="right">Total marks</TableCell>
               <TableCell>Status</TableCell>
               <TableCell align="right">Action</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {queue.map((allocation: any) => (
-              <TableRow key={allocation.id} hover>
-                <TableCell>{allocation.answerScript?.scriptCode}</TableCell>
-                <TableCell>{allocation.answerScript?.exam?.name}</TableCell>
-                <TableCell>{allocation.evaluator?.email}</TableCell>
+            {queue.map((item) => (
+              <TableRow key={item.id} hover>
+                <TableCell>{item.scriptCode}</TableCell>
+                <TableCell>{item.examName}</TableCell>
+                <TableCell>{item.evaluator.email}</TableCell>
                 <TableCell>
-                  <StatusChip status={allocation.status} />
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={item.type === "REVALUATION" ? "Revaluation" : "First evaluation"}
+                  />
+                </TableCell>
+                <TableCell align="right">{item.totalMarksAwarded ?? "-"}</TableCell>
+                <TableCell>
+                  <StatusChip status={item.status} />
                 </TableCell>
                 <TableCell align="right">
                   <Button
                     size="small"
                     component={Link}
-                    href={`/chief-evaluator/moderation/${allocation.id}`}
+                    href={`/chief-evaluator/moderation/${item.id}`}
                   >
                     Review
                   </Button>
                 </TableCell>
               </TableRow>
             ))}
-            {queue.length === 0 ? (
+            {queue.length === 0 && !error ? (
               <TableRow>
-                <TableCell colSpan={5}>
+                <TableCell colSpan={7}>
                   <Typography variant="body2" color="text.secondary">
                     Nothing waiting on moderation right now.
                   </Typography>
